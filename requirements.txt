@@ -1,0 +1,4 @@
+# Python 3.10 o 3.11 recomendado (scikit-surprise 1.1.3 compila con numpy < 2)
+numpy<2
+pandas<2.3
+scikit-surprise==1.1.3

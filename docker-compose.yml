@@ -1,0 +1,65 @@
+# ShopFast EP3 - ejecutar con:  docker compose up -d --build
+# Requiere .env (copiar de .env.example) y artifacts/ con shopfast.db, svd_model.pkl y metrics.json
+# (se generan con model/train.py o se descargan de S3).
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    # Sin "ports": RabbitMQ solo es accesible dentro de la red interna de Docker.
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/shopfast.db
+      ARTIFACTS_DIR: /data
+      RABBITMQ_HOST: rabbitmq
+    volumes:
+      - ./artifacts:/data          # volumen compartido con el worker (SQLite en modo WAL)
+    ports:
+      - "8000:8000"                # API (Swagger en /docs, Postman, Locust)
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/shopfast.db
+      RABBITMQ_HOST: rabbitmq
+    volumes:
+      - ./artifacts:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      API_KEY: ${API_KEY}          # nginx la agrega al reenviar /api/ (no va en el JS del navegador)
+    ports:
+      - "80:80"                    # tienda + dashboard
+    depends_on:
+      api:
+        condition: service_healthy
